@@ -1,3 +1,14 @@
+"""Tema 3 - RAG Search.
+
+1. Încarcă (chunking + ingestion) toate fișierele din folderul data_sources în ChromaDB.
+   Fiecare chunk primește metadatele: source (numele fișierului), page, chunk.
+2. Utilizatorul scrie: <nume fișier>, <întrebare>   ex: paragraphs.txt, Despre cine e vorba in acel text?
+3. Programul verifică dacă are date despre acel fișier și caută DOAR în chunk-urile lui
+   (collection.query cu where={"source": ...}).
+4. Un LLM răspunde din rezultatele găsite, cu numele fișierului și numărul paginii.
+5. Tema 3.1: rezultatele cu distanța cosinus peste MAX_DISTANCE sunt ignorate; dacă nu rămâne
+   niciun rezultat, programul spune că nu a găsit nimic (și nu mai întreabă LLM-ul).
+"""
 import os
 from pathlib import Path
 
@@ -16,6 +27,7 @@ COLLECTION_NAME = "data_sources_chunks"
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 120
 N_RESULTS = 3
+MAX_DISTANCE = 0.5   # Tema 3.1: rezultatele cu distanța cosinus mai mare sunt ignorate (mai mic = mai bun)
 
 SYSTEM_PROMPT = """Answer only from the supplied context. If the context does not answer the question, say so.
 For every piece of information, say the file name and the page number it comes from,
@@ -122,6 +134,11 @@ def search(collection, model, source: str, question: str, n_results: int = N_RES
     return found
 
 
+def filter_by_distance(results: list[dict], max_distance: float = MAX_DISTANCE) -> list[dict]:
+    """Tema 3.1: păstrează doar rezultatele suficient de apropiate de întrebare."""
+    return [r for r in results if r["distance"] <= max_distance]
+
+
 def build_context(results: list[dict]) -> str:
     pieces = [f"{r['text']}\nSource: {r['source']}, page {r['page']}" for r in results]
     return "\n\n".join(pieces)
@@ -173,9 +190,15 @@ def main():
             continue
 
         results = search(collection, model, request.source, request.question)
+        relevant = filter_by_distance(results)
         for r in results:
-            print(f"found> {r['source']}, pagina {r['page']}, distanța {r['distance']:.3f}")
-        print("agent>", answer_question(client, request.question, results))
+            status = "păstrat" if r in relevant else f"ignorat, peste {MAX_DISTANCE}"
+            print(f"found> {r['source']}, pagina {r['page']}, distanța {r['distance']:.3f} ({status})")
+
+        if not relevant:
+            print("agent> Nu s-a găsit niciun rezultat relevant: toate rezultatele sunt la o distanță prea mare.")
+            continue
+        print("agent>", answer_question(client, request.question, relevant))
 
 
 if __name__ == "__main__":

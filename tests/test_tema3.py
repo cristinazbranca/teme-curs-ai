@@ -8,8 +8,8 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from pydantic import ValidationError
 
-from tema3 import (CHUNK_OVERLAP, CHUNK_SIZE, DATA_DIR, answer_question, build_context, chunk_text,
-                   has_source, index_file, index_folder, parse_input, read_pages, search)
+from tema3 import (CHUNK_OVERLAP, CHUNK_SIZE, DATA_DIR, MAX_DISTANCE, answer_question, build_context, chunk_text,
+                   filter_by_distance, has_source, index_file, index_folder, parse_input, read_pages, search)
 
 load_dotenv()
 
@@ -107,6 +107,34 @@ def test_build_context_contine_sursa_si_pagina():
     assert "Source: ion.txt, page 1" in context
 
 
+# ---------------- Tema 3.1: limita de distanță ----------------
+
+def test_filter_by_distance_pastreaza_doar_rezultatele_apropiate():
+    results = [
+        {"text": "a", "source": "x.txt", "page": 1, "distance": 0.2},
+        {"text": "b", "source": "x.txt", "page": 1, "distance": 0.5},
+        {"text": "c", "source": "x.txt", "page": 2, "distance": 0.8},
+    ]
+    pastrate = filter_by_distance(results, max_distance=0.5)
+    assert [r["text"] for r in pastrate] == ["a", "b"]     # 0.8 e peste limită
+
+
+def test_filter_by_distance_fara_rezultate():
+    results = [{"text": "c", "source": "x.txt", "page": 1, "distance": 0.9}]
+    assert filter_by_distance(results, max_distance=0.5) == []
+
+
+def test_limita_implicita_este_0_5():
+    assert MAX_DISTANCE == 0.5
+
+
+def test_search_si_filtrare_pe_date_reale(collection, folder):
+    index_folder(collection, FakeModel(), folder)
+    results = search(collection, FakeModel(), "ion.txt", "Ce are Ion?")
+    assert filter_by_distance(results, max_distance=1.0) == results   # limită mare: păstrează tot
+    assert filter_by_distance(results, max_distance=-1.0) == []       # limită imposibilă: nimic
+
+
 @pytest.mark.skipif(not os.getenv("OPEN_ROUTER_API_KEY"), reason="lipsește OPEN_ROUTER_API_KEY în .env")
 def test_agentul_raspunde_cu_fisierul(collection):
     index_folder(collection, FakeModel(), DATA_DIR)
@@ -114,4 +142,4 @@ def test_agentul_raspunde_cu_fisierul(collection):
     client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPEN_ROUTER_API_KEY"))
     raspuns = answer_question(client, "Despre cine e vorba in acel text?", results)
     assert "marcus" in raspuns.lower()
-    assert "paragraphs.txt" in  raspuns
+    assert "paragraphs.txt" in raspuns
