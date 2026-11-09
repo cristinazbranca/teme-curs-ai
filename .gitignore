@@ -12,3 +12,4 @@ wheels/
 .DS_Store
 .idea/
 .pytest_cache/
+chroma_db/
