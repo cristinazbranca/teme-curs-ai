@@ -15,9 +15,6 @@ load_dotenv()
 
 
 class FakeModel:
-    """Model de embeddings „de jucărie”, ca testele să ruleze rapid și fără internet.
-    Transformă textul într-un vector cu frecvența fiecărei litere."""
-
     def encode(self, texts, normalize_embeddings=True):
         single = isinstance(texts, str)
         vectors = []
@@ -29,7 +26,6 @@ class FakeModel:
 
 @pytest.fixture
 def collection():
-    # o colecție nouă, în memorie, pentru fiecare test
     client = chromadb.EphemeralClient()
     return client.get_or_create_collection(name=f"test_{uuid.uuid4().hex}", metadata={"hnsw:space": "cosine"})
 
@@ -44,7 +40,7 @@ def folder(tmp_path):
 def test_chunk_text_marime_si_suprapunere():
     text = "".join(str(i % 10) for i in range(2000))
     chunks = chunk_text(text)
-    assert len(chunks) == 3                       # încep la 0, 680, 1360
+    assert len(chunks) == 3
     assert all(len(c) <= CHUNK_SIZE for c in chunks)
     assert chunks[0][-CHUNK_OVERLAP:] == chunks[1][:CHUNK_OVERLAP]
 
@@ -107,8 +103,6 @@ def test_build_context_contine_sursa_si_pagina():
     assert "Source: ion.txt, page 1" in context
 
 
-# ---------------- Tema 3.1: limita de distanță ----------------
-
 def test_filter_by_distance_pastreaza_doar_rezultatele_apropiate():
     results = [
         {"text": "a", "source": "x.txt", "page": 1, "distance": 0.2},
@@ -116,7 +110,7 @@ def test_filter_by_distance_pastreaza_doar_rezultatele_apropiate():
         {"text": "c", "source": "x.txt", "page": 2, "distance": 0.8},
     ]
     pastrate = filter_by_distance(results, max_distance=0.5)
-    assert [r["text"] for r in pastrate] == ["a", "b"]     # 0.8 e peste limită
+    assert [r["text"] for r in pastrate] == ["a", "b"]
 
 
 def test_filter_by_distance_fara_rezultate():
@@ -131,8 +125,8 @@ def test_limita_implicita_este_0_5():
 def test_search_si_filtrare_pe_date_reale(collection, folder):
     index_folder(collection, FakeModel(), folder)
     results = search(collection, FakeModel(), "ion.txt", "Ce are Ion?")
-    assert filter_by_distance(results, max_distance=1.0) == results   # limită mare: păstrează tot
-    assert filter_by_distance(results, max_distance=-1.0) == []       # limită imposibilă: nimic
+    assert filter_by_distance(results, max_distance=1.0) == results
+    assert filter_by_distance(results, max_distance=-1.0) == []
 
 
 @pytest.mark.skipif(not os.getenv("OPEN_ROUTER_API_KEY"), reason="lipsește OPEN_ROUTER_API_KEY în .env")

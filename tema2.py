@@ -1,4 +1,3 @@
-
 import json
 import os
 from pathlib import Path
@@ -11,7 +10,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 KEYWORD = "pytest"
 MAX_AGENT_STEPS = 6
 
-# foldere pe care nu le căutăm: pachetele instalate (.venv) conțin "pytest" de mii de ori
 IGNORED_FOLDERS = {".venv", ".git", "__pycache__", ".pytest_cache", ".idea"}
 
 SYSTEM_PROMPT = """You are a helpful assistant that searches inside a code project.
@@ -29,14 +27,10 @@ class SearchKeywordRequest(BaseModel):
 
 
 class EmptyRequest(BaseModel):
-    """list_files nu primește niciun argument."""
     model_config = ConfigDict(extra="forbid")
 
 
-# ---------------- uneltele ----------------
-
 def project_files() -> list[Path]:
-    """Toate fișierele din proiect, fără folderele ignorate."""
     files = []
     for path in sorted(PROJECT_ROOT.rglob("*")):
         relative = path.relative_to(PROJECT_ROOT)
@@ -48,14 +42,11 @@ def project_files() -> list[Path]:
 
 
 def list_files() -> str:
-    """Unealta 1: echivalentul lui `dir /s`. Returnează căile fișierelor, una pe linie."""
     lines = [path.relative_to(PROJECT_ROOT).as_posix() for path in project_files()]
     return "\n".join(lines)
 
 
 def search_keyword(args: dict) -> str:
-    """Unealta 2: echivalentul lui `findstr /s /i "keyword" *.*`.
-    Returnează fișierele în care apare cuvântul (fără să țină cont de majuscule)."""
     try:
         request = SearchKeywordRequest.model_validate(args)
     except ValidationError as error:
@@ -67,7 +58,7 @@ def search_keyword(args: dict) -> str:
         try:
             text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
-            continue  # fișier binar sau care nu se poate citi
+            continue
         if keyword in text.lower():
             found.append(path.relative_to(PROJECT_ROOT).as_posix())
 
@@ -105,8 +96,6 @@ def call_tool(name: str, args: dict) -> str:
     return f"error: unknown tool {name}"
 
 
-# ---------------- agentul ----------------
-
 def complete(client: OpenAI, messages: list[dict]):
     return client.chat.completions.create(
         model=os.getenv("OPEN_ROUTER_MODEL_NAME"),
@@ -117,7 +106,6 @@ def complete(client: OpenAI, messages: list[dict]):
 
 
 def run_agent(client: OpenAI, keyword: str = KEYWORD) -> str:
-    """Rulează agentul până când răspunde fără să mai ceară unelte. Returnează textul final."""
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": f"Find all files in this project that contain the keyword '{keyword}'."},

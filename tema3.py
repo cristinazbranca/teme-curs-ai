@@ -1,14 +1,3 @@
-"""Tema 3 - RAG Search.
-
-1. Încarcă (chunking + ingestion) toate fișierele din folderul data_sources în ChromaDB.
-   Fiecare chunk primește metadatele: source (numele fișierului), page, chunk.
-2. Utilizatorul scrie: <nume fișier>, <întrebare>   ex: paragraphs.txt, Despre cine e vorba in acel text?
-3. Programul verifică dacă are date despre acel fișier și caută DOAR în chunk-urile lui
-   (collection.query cu where={"source": ...}).
-4. Un LLM răspunde din rezultatele găsite, cu numele fișierului și numărul paginii.
-5. Tema 3.1: rezultatele cu distanța cosinus peste MAX_DISTANCE sunt ignorate; dacă nu rămâne
-   niciun rezultat, programul spune că nu a găsit nimic (și nu mai întreabă LLM-ul).
-"""
 import os
 from pathlib import Path
 
@@ -27,7 +16,7 @@ COLLECTION_NAME = "data_sources_chunks"
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 120
 N_RESULTS = 3
-MAX_DISTANCE = 0.5   # Tema 3.1: rezultatele cu distanța cosinus mai mare sunt ignorate (mai mic = mai bun)
+MAX_DISTANCE = 0.5
 
 SYSTEM_PROMPT = """Answer only from the supplied context. If the context does not answer the question, say so.
 For every piece of information, say the file name and the page number it comes from,
@@ -39,10 +28,7 @@ class UserQuestion(BaseModel):
     question: str = Field(min_length=1, description="Întrebarea utilizatorului.")
 
 
-# ---------------- citire și chunking ----------------
-
 def chunk_text(text: str) -> list[str]:
-    """Taie textul în bucăți de CHUNK_SIZE caractere, cu suprapunere de CHUNK_OVERLAP."""
     chunks = []
     start = 0
     while start < len(text):
@@ -54,18 +40,13 @@ def chunk_text(text: str) -> list[str]:
 
 
 def read_pages(file_path: Path) -> list[tuple[int, str]]:
-    """Returnează paginile fișierului ca listă de (număr_pagină, text).
-    PDF-urile au pagini reale; un fișier text e considerat o singură pagină (1)."""
     if file_path.suffix.lower() == ".pdf":
         pages = pymupdf4llm.to_markdown(str(file_path), page_chunks=True)
         return [(page["metadata"]["page_number"], page["text"]) for page in pages]
     return [(1, file_path.read_text(encoding="utf-8"))]
 
 
-# ---------------- ingestion ----------------
-
 def index_file(collection, model, file_path: Path) -> int:
-    """Încarcă un fișier în baza de date. Returnează câte chunk-uri au fost salvate."""
     ids, documents, metadatas = [], [], []
     for page_number, page_text in read_pages(file_path):
         for chunk_number, chunk in enumerate(chunk_text(page_text)):
@@ -73,7 +54,6 @@ def index_file(collection, model, file_path: Path) -> int:
             documents.append(chunk)
             metadatas.append({"source": file_path.name, "page": page_number, "chunk": chunk_number})
 
-    # ștergem ce era încărcat înainte din acest fișier, ca să nu avem duplicate (idempotență)
     collection.delete(where={"source": file_path.name})
     if documents:
         collection.upsert(
@@ -86,7 +66,6 @@ def index_file(collection, model, file_path: Path) -> int:
 
 
 def index_folder(collection, model, folder: Path = DATA_DIR) -> dict[str, int]:
-    """Încarcă toate fișierele din folder. Returnează {nume_fișier: număr_chunk-uri}."""
     report = {}
     for file_path in sorted(folder.iterdir()):
         if file_path.is_file() and not file_path.name.startswith("."):
@@ -97,24 +76,19 @@ def index_folder(collection, model, folder: Path = DATA_DIR) -> dict[str, int]:
     return report
 
 
-# ---------------- întrebare și căutare ----------------
-
 def parse_input(text: str) -> UserQuestion:
-    """'paragraphs.txt, Despre cine e vorba?' -> UserQuestion(source=..., question=...)"""
     if "," not in text:
         raise ValueError("Scrie așa: <nume fișier>, <întrebare>")
-    source, question = text.split(",", 1)  # tăiem doar la prima virgulă
+    source, question = text.split(",", 1)
     return UserQuestion(source=source.strip(), question=question.strip())
 
 
 def has_source(collection, source: str) -> bool:
-    """Verifică dacă baza de date are măcar un chunk din fișierul dat."""
     result = collection.get(where={"source": source}, limit=1)
     return len(result["ids"]) > 0
 
 
 def search(collection, model, source: str, question: str, n_results: int = N_RESULTS) -> list[dict]:
-    """Caută întrebarea DOAR în chunk-urile fișierului dat."""
     query_embedding = model.encode(question, normalize_embeddings=True).tolist()
     results = collection.query(
         query_embeddings=[query_embedding],
@@ -135,7 +109,6 @@ def search(collection, model, source: str, question: str, n_results: int = N_RES
 
 
 def filter_by_distance(results: list[dict], max_distance: float = MAX_DISTANCE) -> list[dict]:
-    """Tema 3.1: păstrează doar rezultatele suficient de apropiate de întrebare."""
     return [r for r in results if r["distance"] <= max_distance]
 
 
@@ -145,7 +118,6 @@ def build_context(results: list[dict]) -> str:
 
 
 def answer_question(client: OpenAI, question: str, results: list[dict]) -> str:
-    """Agentul LLM răspunde doar din rezultatele găsite, cu fișierul și pagina."""
     response = client.chat.completions.create(
         model=os.getenv("OPEN_ROUTER_MODEL_NAME"),
         messages=[
@@ -156,11 +128,9 @@ def answer_question(client: OpenAI, question: str, results: list[dict]) -> str:
     return response.choices[0].message.content or ""
 
 
-# ---------------- programul ----------------
-
 def main():
     load_dotenv()
-    from sentence_transformers import SentenceTransformer  # import aici: se încarcă greu
+    from sentence_transformers import SentenceTransformer
 
     print("start> încarc modelul de embeddings...")
     model = SentenceTransformer(MODEL_NAME)
